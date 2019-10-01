@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import sys
 import socket
 import selectors
@@ -7,8 +5,6 @@ import types
 
 HOST = '127.0.0.1'
 PORT = 8888
-
-#logs = {}
 
 selector = selectors.DefaultSelector()
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -39,11 +35,6 @@ def serviceConnection(key, mask):
             print("(L) Closing connection to ", data.addr)
             selector.unregister(sock)
             sock.close()
-   # if mask & selectors.EVENT_WRITE:
-   #     if data.outb:
-   #         print('sending', repr(data.outb), 'to', data.addr)
-            #sent = sock.send(data.outb)  # Should be ready to write
-            #data.outb = data.outb[sent:]
 
 def manageMessage(msg, senderData):
     msg = msg.decode("utf-8")
@@ -87,14 +78,18 @@ def addNewClient(msg, clientData):
     f = open(mail + ".txt", "w+")
     f.close()
 
-def verifyRegistration(msg, sender_data):
+def verifyRegistration(msg, senderData):
     if not checkVerificationCode(msg):
         print("Verification code incorrect")
     else:
-        addNewClient(msg, sender_data)
+        addNewClient(msg, senderData)
         print("successfull registration")
-    #sendRegistrationConfirmation() - todo
+        sendRegistrationConfirmation(senderData)
 
+def sendRegistrationConfirmation(senderData):
+    data = "0:registrationConfirmation"
+    data = bytes(data, 'utf-8')
+    getSocket(senderData.addr).send(data)
 
 def isClientAlreadyRegistered(msg): #todo - sprawdzac tylko po mailu
     f = open("registeredClients.txt", "r")
@@ -141,13 +136,17 @@ def verifyPassword(clientLogin, clientPassword): #todo - ???
     f.close()
     return isPasswordCorrect
 
-def loginClient(msg, sender_data):
+def loginClient(msg, senderData):
     login, password = msg.split(":")
     if verifyPassword(login, password):
-        mapClientAddress(login, sender_data.addr)
+        mapClientAddress(login, senderData.addr)
         print("login successful")
-        #sendLoginConfirmation() - todo
+        sendLoginConfirmation(senderData)
 
+def sendLoginConfirmation(senderData):
+    data = "1:loginConfirmation"
+    data = bytes(data, 'utf-8')
+    getSocket(senderData.addr).send(data)
 
 def storeLogs(logs, clientData):  #todo - zabezpieczenie przed niezalogowanymi klientami
     f = open(clientsAddresses[clientData.addr] + ".txt", "a+")
@@ -162,11 +161,8 @@ def synchronizing(msg, clientData):
     for line in lines:
         timestamp, logs = line.split(":")
         timestamp = int(timestamp)
-        #timestamp = int(log[0:10])
-        #log_data = log[10:]
         if timestamp > synchTimestamp:
-            sendData = bytes(logs, 'utf-8')
-            #s.sendall(data2)
+            sendData = bytes(str(timestamp) + ":" + logs[:-1], 'utf-8')
             print("send_data: ", sendData)
             print("address: ", clientData.addr)
             #should also send timestamp
@@ -175,7 +171,6 @@ def synchronizing(msg, clientData):
 
 def getSocket(addr):
    return connections[addr]
-
 
 if __name__=='__main__':    
     sock.bind((HOST, PORT))
