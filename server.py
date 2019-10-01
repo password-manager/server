@@ -15,9 +15,13 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 clientsAddresses = {}
 
+connections = {}
+
 def acceptConnection(sock):
     connection, addr = sock.accept()
+    connections[addr] = connection
     connection.setblocking(False)
+    print(connection)
     print("(L) Connection from ", addr)
     data = types.SimpleNamespace(addr = addr, inb = b"", outb = b"")
     events = selectors.EVENT_READ | selectors.EVENT_WRITE
@@ -35,7 +39,11 @@ def serviceConnection(key, mask):
             print("(L) Closing connection to ", data.addr)
             selector.unregister(sock)
             sock.close()
-
+   # if mask & selectors.EVENT_WRITE:
+   #     if data.outb:
+   #         print('sending', repr(data.outb), 'to', data.addr)
+            #sent = sock.send(data.outb)  # Should be ready to write
+            #data.outb = data.outb[sent:]
 
 def manageMessage(msg, senderData):
     msg = msg.decode("utf-8")
@@ -84,6 +92,7 @@ def verifyRegistration(msg, sender_data):
         print("Verification code incorrect")
     else:
         addNewClient(msg, sender_data)
+        print("successfull registration")
     #sendRegistrationConfirmation() - todo
 
 
@@ -136,6 +145,7 @@ def loginClient(msg, sender_data):
     login, password = msg.split(":")
     if verifyPassword(login, password):
         mapClientAddress(login, sender_data.addr)
+        print("login successful")
         #sendLoginConfirmation() - todo
 
 
@@ -155,14 +165,18 @@ def synchronizing(msg, clientData):
         #timestamp = int(log[0:10])
         #log_data = log[10:]
         if timestamp > synchTimestamp:
-            #sendData = bytes(logs, 'utf-8')
+            sendData = bytes(logs, 'utf-8')
             #s.sendall(data2)
-            #print("send_data: ", sendData)
-            #print("address: ", clientData.addr)
-            #sock.sendto(send_data, client_data.addr)
+            print("send_data: ", sendData)
+            print("address: ", clientData.addr)
+            #should also send timestamp
+            getSocket(clientData.addr).send(sendData)
             print("should send log: ", logs)
 
-            
+def getSocket(addr):
+   return connections[addr]
+
+
 if __name__=='__main__':    
     sock.bind((HOST, PORT))
     sock.listen()
