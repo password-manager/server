@@ -1,11 +1,12 @@
-
 import socket
 import random
 import string
 from threading import Thread
+from pyisemail import is_email
+import smtplib, ssl
 
 HOST = '127.0.0.1'
-PORT = 8888
+PORT = 8887
 
 class ClientThread(Thread):
     def __init__(self, addr):
@@ -47,8 +48,9 @@ class ClientThread(Thread):
     def registerClient(self, msg):
         if self.isClientAlreadyRegistered(msg):
             self.sendErrorMsg("Client with given email is already registered")
+        elif not self.verifyClientEmail(msg):
+            self.sendErrorMsg("Wrong email address")
         else:
-            self.verifyClientEmail(msg)
             code = self.generateVerificationCode(msg)
             self.sendMailWithVerificationCode(code)
 
@@ -65,19 +67,31 @@ class ClientThread(Thread):
             return True
         return False
 
-    def verifyClientEmail(self, msg): #TODO - check syntax and if the mail exists
-        mail, _ = msg.split(":")
-        print("veryfying mail: " + mail + " - todo")
+    def verifyClientEmail(self, msg):
+        address, _ = msg.split(":")
+        return is_email(address, check_dns=True)
 
     def generateVerificationCode(self, msg):
         generatedCode = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
-        #generatedCode = "generatedCode"
         with open("registeringClients.txt", "a+") as f:
             f.write(msg + ":" + generatedCode + "\n")
         return generatedCode
 
     def sendMailWithVerificationCode(self, code):
-        print("sending code: " + code + " - todo")
+        port = 465  # For SSL
+        smtp_server = "smtp.gmail.com"
+        sender_email = "aghpassman@gmail.com"  # Enter your address
+        receiver_email = "klaudia.ma.garnek@gmail.com"  # Enter receiver address
+        password = "strongestPasswordEver"
+        message = """\
+        Subject: Verification code
+
+        This is your verification code: """ + code
+
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+            server.login(sender_email, password)
+            server.sendmail(sender_email, receiver_email, message)
 
     def verifyRegistration(self, msg):
         if not self.checkVerificationCode(msg):
