@@ -1,5 +1,7 @@
 
 import socket
+import random
+import string
 from threading import Thread
 
 HOST = '127.0.0.1'
@@ -37,30 +39,41 @@ class ClientThread(Thread):
         if msg_id == "4":
             self.synchronize(msg)
 
+    def sendErrorMsg(self, msg):
+        data = bytes(msg, 'utf-8')
+        conn.send(data)
+        print("(L)" + msg)
+
     def registerClient(self, msg):
         if self.isClientAlreadyRegistered(msg):
-            print("(L)Client with given email already exists")
+            self.sendErrorMsg("Client with given email is already registered")
         else:
             self.verifyClientEmail(msg)
             code = self.generateVerificationCode(msg)
             self.sendMailWithVerificationCode(code)
 
-    def isClientAlreadyRegistered(self, msg): #todo - sprawdzac tylko po mailu + sprawdzać też w registeringClients
-        f = open("registeredClients.txt", "r")
-        lines = f.read().splitlines()
-        if msg in lines:
+    def isClientAlreadyRegistered(self, msg):
+        with open("registeredClients.txt", "r") as f:
+            lines = f.read().splitlines()
+        with open("registeringClients.txt", "r") as f:
+            lines += f.read().splitlines()
+        clients = []
+        for line in lines:
+            clients.append(line.split(":")[0])
+        mail = msg.split(":")[0]
+        if mail in clients:
             return True
         return False
 
-    def verifyClientEmail(self, msg): #todo - sprawdzać syntax i czy mail istnieje
+    def verifyClientEmail(self, msg): #TODO - check syntax and if the mail exists
         mail, _ = msg.split(":")
         print("veryfying mail: " + mail + " - todo")
 
     def generateVerificationCode(self, msg):
-        generatedCode = "generatedCode" #todo - generating
-        f = open("registeringClients.txt", "a+")
-        f.write(msg + ":" + generatedCode + "\n")
-        f.close()
+        generatedCode = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
+        #generatedCode = "generatedCode"
+        with open("registeringClients.txt", "a+") as f:
+            f.write(msg + ":" + generatedCode + "\n")
         return generatedCode
 
     def sendMailWithVerificationCode(self, code):
