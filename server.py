@@ -10,7 +10,6 @@ PORT = 8887
 SSL_PORT = 465
 SMTP_SERVER = "smtp.gmail.com"
 SENDER_EMAIL = "aghpassman@gmail.com"
-PASSWORD = "strongestPasswordEver"
 
 class ClientThread(Thread):
     def __init__(self, addr):
@@ -62,8 +61,6 @@ class ClientThread(Thread):
     def isClientAlreadyRegistered(self, msg):
         with open("registeredClients.txt", "r") as f:
             lines = f.read().splitlines()
-        with open("registeringClients.txt", "r") as f:  #todo- chyba powinnismy sprawdzac tylko registeredClients
-            lines += f.read().splitlines()
         clients = []
         for line in lines:
             clients.append(line.split(":")[0])
