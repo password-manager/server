@@ -6,11 +6,13 @@ from pyisemail import is_email
 import smtplib, ssl
 import json
 
+#todo - move to some config file
 HOST = '127.0.0.1'
 PORT = 8887
 SSL_PORT = 465
 SMTP_SERVER = "smtp.gmail.com"
 SENDER_EMAIL = "aghpassman@gmail.com"
+PASSWORD = "strongestPasswordEver"
 
 class ClientThread(Thread):
     def __init__(self, addr):
@@ -21,7 +23,7 @@ class ClientThread(Thread):
 
     def run(self):
         while True:
-            recvData = conn.recv(2048) #TODO - how big can messages be
+            recvData = conn.recv(2048)
             if recvData:
                 self.manageMessage(recvData)
             else:
@@ -56,32 +58,37 @@ class ClientThread(Thread):
             self.sendErrorMsg("Email address not valid")
         else:
             print("(L)Email is valid")
-            code = self.generateVerificationCode(msg)
+            code = self.generateVerificationCode()
+            self.saveClientData(msg, code)
             self.sendMailWithVerificationCode(msg, code)
 
     def isClientAlreadyRegistered(self, msg):
-        with open("registeredClients.txt", "r") as f:
-            lines = f.read().splitlines()
-        clients = []
-        for line in lines:
-            clients.append(line.split(":")[0])
-        mail = msg.split(":")[0]
-        if mail in clients:
-            return True
-        return False
+        with open("registeredClients.json", "r") as file:
+            clients = json.load(file)
+            client = [x for x in clients if x['login'] == msg.split(":")[0]]
+            if client:
+                return True
+            return False
 
     def verifyClientEmail(self, msg):
-        address, _ = msg.split(":")
+        address, _, _ = msg.split(":")
         return is_email(address, check_dns=False)
 
-    def generateVerificationCode(self, msg):
-        generatedCode = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
-        with open("registeringClients.txt", "a+") as f:
-            f.write(msg + ":" + generatedCode + "\n")
-        return generatedCode
+    def generateVerificationCode(self):
+        return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
+
+    def saveClientData(self, msg, code):#todo - sprawdzic czy juz istnieje i ewentualnie podmienic
+        login, hash, salt = msg.split(":")
+        newClient = "[{\"login\": \"" + login + "\", \"hash\": \"" + hash + "\", \"salt\": \"" + salt + "\", \"code\": \"" + code + "\"}]"
+        print ("(L)New client: ", newClient)
+        with open("registeringClients.json", "r+") as file:
+            fileClients = file.read()
+            clients = json.loads(fileClients) + json.loads(newClient)
+            file.seek(0)
+            json.dump(clients, file)
 
     def sendMailWithVerificationCode(self, msg, code):
-        receiver_email, _ = msg.split(":")
+        receiver_email, _, _ = msg.split(":")
         message = """\
         Verification code
 
@@ -93,7 +100,7 @@ class ClientThread(Thread):
             server.sendmail(SENDER_EMAIL, receiver_email, message)
         print("(L)Email with verification code sent")
 
-    def verifyRegistration(self, msg):
+    def verifyRegistration(self, msg): #todo - sprawdzanie hasła
         if not self.checkVerificationCode(msg):
             print("(L)Verification code incorrect")
         else:
@@ -101,27 +108,33 @@ class ClientThread(Thread):
             print("(L)Successful registration")
             self.sendRegistrationConfirmation()
 
-    def checkVerificationCode(self, msg): # todo - poprawic sprawdzanie i obsluge pliku
-        f = open("registeringClients.txt", "r")
-        lines = f.read().splitlines()
-        isVerified = False
-        if msg in lines:
-            isVerified = True
-        f.close()
-        return isVerified
+    def checkVerificationCode(self, msg):
+        login, _, code = msg.split(":")
+        with open("registeringClients.json", "r") as file:
+            clients = json.load(file)
+            client = ([x for x in clients if x['login'] == login])[0]
+            if client['code'] == code:
+                return True
+            return False
 
     def addNewClient(self, msg):
-        mail, password, _ = msg.split(":")
-        f = open("registeredClients.txt", "a+")
-        f.write(mail + ":" + password + "\n")
-        f.close()
-        #self.clientLogin = mail
-        # todo - usuwanie z registeringClients.txt
-        #mapClientAddress(mail, addr)
+        login, _, _ = msg.split(":")
+        with open("registeringClients.json", "r") as file:
+            clients = json.load(file)
+            client = ([x for x in clients if x['login'] == login])[0]
+            hash = client['hash']
+            salt = client['salt']
+            #todo - usuwanie z registeringClients
 
-        f = open("databases/" + mail + ".json", "w+")
-        f.write("[]")
-        f.close()
+        newClient = "[{\"login\": \"" + login + "\", \"hash\": \"" + hash + "\", \"salt\": \"" + salt + "\"}]"
+        print ("(L)New client: ", newClient)
+        with open("registeredClients.json", "r+") as file:
+            clients = json.load(file) + json.loads(newClient)
+            file.seek(0)
+            json.dump(clients, file)
+
+        with open("databases/" + login + ".json", "w+") as file:
+            file.write("[]")
 
     def sendRegistrationConfirmation(self):
         data = "0:registrationConfirmation"
@@ -137,20 +150,13 @@ class ClientThread(Thread):
         else:
             print("(L)Login unsuccessful")
 
-    def verifyPassword(self, clientLogin, clientPassword):  # todo - ???
-        f = open("registeredClients.txt", "r")
-        clients = f.read().splitlines()
-        clients = dict(map(lambda s: s.split(':'), clients))
-
-        isPasswordCorrect = False
-        for login, password in clients.items():
-            if login == clientLogin:
-                if password != clientPassword:
-                    print("incorrect password")
-                else:
-                    isPasswordCorrect = True
-        f.close()
-        return isPasswordCorrect
+    def verifyPassword(self, login, password):  # todo - hash z hasła -> porównujemy
+        with open("registeredClients.json", "r") as file:
+            clients = json.load(file)
+            client = [x for x in clients if x['login'] == login][0]
+            if client['hash'] == password:
+                return True
+            return False
 
     def sendLoginConfirmation(self):
         data = "1:loginConfirmation"
@@ -160,15 +166,14 @@ class ClientThread(Thread):
     def storeLogs(self, messageLogs):
         if self.clientLogin:
             with open("databases/" + self.clientLogin + ".json", "r+") as file:
-                fileLogs = file.read()
-                logs = json.loads(fileLogs) + json.loads(messageLogs)
+                logs = json.load(file) + json.loads(messageLogs)
                 file.seek(0)
                 json.dump(logs, file)
 
     def synchronize(self, clientTimestamp):
         if self.clientLogin:
             with open("databases/" + self.clientLogin + ".json", "r") as file:
-                allLogs = json.loads(file.read())
+                allLogs = json.load(file)
                 filteredLogs = [log for log in allLogs if log['timestamp'] > clientTimestamp]
                 conn.send(bytes(json.dumps(filteredLogs), 'utf-8'))
 
