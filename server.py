@@ -4,6 +4,7 @@ import string
 from threading import Thread
 from pyisemail import is_email
 import smtplib, ssl
+import json
 
 HOST = '127.0.0.1'
 PORT = 8887
@@ -41,7 +42,7 @@ class ClientThread(Thread):
         if msg_id == "3":
             self.storeLogs(msg)
         if msg_id == "4":
-            self.synchronize(msg)
+            self.synchronize(int(msg))
 
     def sendErrorMsg(self, msg):
         data = bytes(msg, 'utf-8')
@@ -100,7 +101,7 @@ class ClientThread(Thread):
             print("(L)Successful registration")
             self.sendRegistrationConfirmation()
 
-    def checkVerificationCode(self, msg):  # todo - lepsze sprawdzanie i obsługa pliku
+    def checkVerificationCode(self, msg): # todo - poprawic sprawdzanie i obsluge pliku
         f = open("registeringClients.txt", "r")
         lines = f.read().splitlines()
         isVerified = False
@@ -118,7 +119,8 @@ class ClientThread(Thread):
         # todo - usuwanie z registeringClients.txt
         #mapClientAddress(mail, addr)
 
-        f = open(mail + ".txt", "w+")
+        f = open("databases/" + mail + ".json", "w+")
+        f.write("[]")
         f.close()
 
     def sendRegistrationConfirmation(self):
@@ -155,27 +157,20 @@ class ClientThread(Thread):
         data = bytes(data, 'utf-8')
         conn.send(data)
 
-    def storeLogs(self, logs):
+    def storeLogs(self, messageLogs):
         if self.clientLogin:
-            f = open(self.clientLogin + ".txt", "a+")
-            f.write(logs + "\n")
-            f.close()
+            with open("databases/" + self.clientLogin + ".json", "r+") as file:
+                fileLogs = file.read()
+                logs = json.loads(fileLogs) + json.loads(messageLogs)
+                file.seek(0)
+                json.dump(logs, file)
 
-    def synchronize(self, msg):
-        synchTimestamp = int(msg)
+    def synchronize(self, clientTimestamp):
         if self.clientLogin:
-            f = open(self.clientLogin + ".txt", "r")
-            lines = f.readlines()
-            for line in lines:
-                timestamp, logs = line.split(":")
-                timestamp = int(timestamp)
-                if timestamp > synchTimestamp:
-                    sendData = bytes(str(timestamp) + ":" + logs[:-1], 'utf-8')
-                    print("send_data: ", sendData)
-                    print("address: ", self.addr)
-                    conn.send(sendData)
-                    print("should send log: ", logs)
-
+            with open("databases/" + self.clientLogin + ".json", "r") as file:
+                allLogs = json.loads(file.read())
+                filteredLogs = [log for log in allLogs if log['timestamp'] > clientTimestamp]
+                conn.send(bytes(json.dumps(filteredLogs), 'utf-8'))
 
 if __name__=='__main__':
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
