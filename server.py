@@ -19,16 +19,17 @@ class ClientThread(Thread):
         Thread.__init__(self)
         self.addr = addr
         self.clientLogin = ""
+        self.conn = conn
         print("(L)New connection on: ", addr)
 
     def run(self):
         while True:
-            recvData = conn.recv(2048)
+            recvData = self.conn.recv(2048)
             if recvData:
                 self.manageMessage(recvData)
             else:
                 print("(L)Closing connection to ", addr)
-                conn.close()
+                self.conn.close()
 
     def manageMessage(self, msg):
         msg = msg.decode("utf-8")
@@ -48,7 +49,8 @@ class ClientThread(Thread):
 
     def sendErrorMsg(self, msg):
         data = bytes(msg, 'utf-8')
-        conn.send(data)
+        print("sending on connection: ", self.conn)
+        self.conn.send(data)
         print("(L)" + msg)
 
     def registerClient(self, msg):
@@ -139,7 +141,8 @@ class ClientThread(Thread):
     def sendRegistrationConfirmation(self):
         data = "0:registrationConfirmation"
         data = bytes(data, 'utf-8')
-        conn.send(data)
+        print("sending on connection: ", conn)
+        self.conn.send(data)
 
     def loginClient(self, msg):
         login, password = msg.split(":")
@@ -154,14 +157,18 @@ class ClientThread(Thread):
         with open("registeredClients.json", "r") as file:
             clients = json.load(file)
             client = [x for x in clients if x['login'] == login][0]
-            if client['hash'] == password:
+            if client['hash'] == self.generateHash(login, password):
                 return True
             return False
 
+    def generateHash(self, login, password):
+        return password#  + login[0]
+
     def sendLoginConfirmation(self):
         data = "1:loginConfirmation"
+        print("sending on connection: ", conn)
         data = bytes(data, 'utf-8')
-        conn.send(data)
+        self.conn.send(data)
 
     def storeLogs(self, messageLogs):
         if self.clientLogin:
@@ -175,13 +182,18 @@ class ClientThread(Thread):
             with open("databases/" + self.clientLogin + ".json", "r") as file:
                 allLogs = json.load(file)
                 filteredLogs = [log for log in allLogs if log['timestamp'] > clientTimestamp]
-                conn.send(bytes(json.dumps(filteredLogs), 'utf-8'))
+                print("sending logs to: ", conn)
+                print("logs: ", filteredLogs)
+                if filteredLogs:
+                    print("sending on connection: ", conn)
+                    self.conn.send(bytes(json.dumps(filteredLogs), 'utf-8'))
 
 if __name__=='__main__':
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
 
     clientThreads = []
+    clientSockets = {}
 
     print("(L)Ready for connection")
     while True:
