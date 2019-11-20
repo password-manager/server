@@ -5,6 +5,9 @@ from threading import Thread
 from pyisemail import is_email
 import smtplib, ssl
 import json
+import hashlib
+import base64
+import os
 
 #todo - move to some config file
 HOST = '127.0.0.1'
@@ -13,6 +16,8 @@ SSL_PORT = 465
 SMTP_SERVER = "smtp.gmail.com"
 SENDER_EMAIL = "aghpassman@gmail.com"
 PASSWORD = "strongestPasswordEver"
+
+SALT = hashlib.sha256(os.urandom(64)).hexdigest().encode('ascii')
 
 class ClientThread(Thread):
     def __init__(self, addr):
@@ -80,8 +85,9 @@ class ClientThread(Thread):
         return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
 
     def saveClientData(self, msg, code):#todo - sprawdzic czy juz istnieje i ewentualnie podmienic
-        login, hash, salt = msg.split(":")
-        newClient = "[{\"login\": \"" + login + "\", \"hash\": \"" + hash + "\", \"salt\": \"" + salt + "\", \"code\": \"" + code + "\"}]"
+        login, passw, salt = msg.split(":")
+        #salt = bytes(salt, 'utf-8')
+        newClient = "[{\"login\": \"" + login + "\", \"hash\": \"" + self.generateHash(passw, bytes(salt, 'utf-8')) + "\", \"salt\": \"" + salt + "\", \"code\": \"" + code + "\"}]"
         print ("(L)New client: ", newClient)
         with open("registeringClients.json", "r+") as file:
             fileClients = file.read()
@@ -115,6 +121,8 @@ class ClientThread(Thread):
         with open("registeringClients.json", "r") as file:
             clients = json.load(file)
             client = ([x for x in clients if x['login'] == login])[0]
+            print(client['code'])
+            print(code)
             if client['code'] == code:
                 return True
             return False
@@ -126,6 +134,7 @@ class ClientThread(Thread):
             client = ([x for x in clients if x['login'] == login])[0]
             hash = client['hash']
             salt = client['salt']
+            #salt = bytes(salt, 'utf-8')
             #todo - usuwanie z registeringClients
 
         newClient = "[{\"login\": \"" + login + "\", \"hash\": \"" + hash + "\", \"salt\": \"" + salt + "\"}]"
@@ -157,12 +166,18 @@ class ClientThread(Thread):
         with open("registeredClients.json", "r") as file:
             clients = json.load(file)
             client = [x for x in clients if x['login'] == login][0]
-            if client['hash'] == self.generateHash(login, password):
+            #print(client['hash'])
+            #print(self.generateHash(password, SALT))
+            if client['hash'] == self.generateHash(password, bytes(client['salt'],'utf-8')):
                 return True
             return False
 
-    def generateHash(self, login, password):
-        return password#  + login[0]
+    def generateHash(self, password, salt):
+        pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'),
+                                      salt, 100000, dklen=64)
+        pwdhash = base64.b64encode(pwdhash)
+        return pwdhash.decode()
+
 
     def sendLoginConfirmation(self):
         data = "1:loginConfirmation"
@@ -186,7 +201,7 @@ class ClientThread(Thread):
                 print("logs: ", filteredLogs)
                 if filteredLogs:
                     print("sending on connection: ", conn)
-                    self.conn.send(bytes(json.dumps(filteredLogs), 'utf-8'))
+                    self.conn.send(bytes("2:" + json.dumps(filteredLogs), 'utf-8'))
 
 if __name__=='__main__':
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
