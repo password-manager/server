@@ -60,14 +60,15 @@ class ClientThread(Thread):
 
     def registerClient(self, msg):
         if self.isClientAlreadyRegistered(msg):
-            self.sendErrorMsg("Client with given email is already registered")
+            self.sendRegistrationResponse("notOk", "Client with given email is already registered")
         elif not self.verifyClientEmail(msg):
-            self.sendErrorMsg("Email address not valid")
+            self.sendRegistrationResponse("notOk", "Email address not valid")
         else:
             print("(L)Email is valid")
             code = self.generateVerificationCode()
             self.saveClientData(msg, code)
             self.sendMailWithVerificationCode(msg, code)
+            self.sendRegistrationResponse("ok", "Email with verification code sent")
 
     def isClientAlreadyRegistered(self, msg):
         with open("registeredClients.json", "r") as file:
@@ -108,13 +109,20 @@ class ClientThread(Thread):
             server.sendmail(SENDER_EMAIL, receiver_email, message)
         print("(L)Email with verification code sent")
 
+    def sendRegistrationResponse(self, status, msg):
+        data = "0:" + status + ":" + msg
+        data = bytes(data, 'utf-8')
+        print("(L)sending on connection: ", conn)
+        self.conn.send(data)
+
     def verifyRegistration(self, msg): #todo - sprawdzanie hasła
         if not self.checkVerificationCode(msg):
             print("(L)Verification code incorrect")
+            self.sendRegistrationVerificationResponse("notOk", "Verification code incorrect")
         else:
             self.addNewClient(msg)
             print("(L)Successful registration")
-            self.sendRegistrationConfirmation()
+            self.sendRegistrationVerificationResponse("ok", "Succesfull registration")
 
     def checkVerificationCode(self, msg):
         login, _, code = msg.split(":")
@@ -147,27 +155,26 @@ class ClientThread(Thread):
         with open("databases/" + login + ".json", "w+") as file:
             file.write("[]")
 
-    def sendRegistrationConfirmation(self):
-        data = "0:registrationConfirmation"
+    def sendRegistrationVerificationResponse(self, status, msg):
+        data = "1:" + status + ":" + msg
         data = bytes(data, 'utf-8')
-        print("sending on connection: ", conn)
+        print("(L)sending on connection: ", conn)
         self.conn.send(data)
 
     def loginClient(self, msg):
         login, password = msg.split(":")
         if self.verifyPassword(login, password):
             print("(L)Login successful")
-            self.sendLoginConfirmation()
+            self.sendLoginResponse("ok", "Login successful")
             self.clientLogin = login
         else:
             print("(L)Login unsuccessful")
+            self.sendLoginResponse("notOk", "Login unsuccessful - wrong password") #TODO - inne kozy
 
     def verifyPassword(self, login, password):  # todo - hash z hasła -> porównujemy
         with open("registeredClients.json", "r") as file:
             clients = json.load(file)
             client = [x for x in clients if x['login'] == login][0]
-            #print(client['hash'])
-            #print(self.generateHash(password, SALT))
             if client['hash'] == self.generateHash(password, bytes(client['salt'],'utf-8')):
                 return True
             return False
@@ -178,10 +185,9 @@ class ClientThread(Thread):
         pwdhash = base64.b64encode(pwdhash)
         return pwdhash.decode()
 
-
-    def sendLoginConfirmation(self):
-        data = "1:loginConfirmation"
-        print("sending on connection: ", conn)
+    def sendLoginResponse(self, status, msg):
+        data = "2:" + status + ":" + msg
+        print("(L)sending on connection: ", conn)
         data = bytes(data, 'utf-8')
         self.conn.send(data)
 
