@@ -48,15 +48,9 @@ class ClientThread(Thread):
         if msg_id == "2":
             self.loginClient(msg)
         if msg_id == "3":
-            self.storeLogs(msg)
-        if msg_id == "4":
             self.synchronize(int(msg))
-
-    def sendErrorMsg(self, msg):
-        data = bytes(msg, 'utf-8')
-        print("sending on connection: ", self.conn)
-        self.conn.send(data)
-        print("(L)" + msg)
+        if msg_id == "4":
+            self.storeLogs(msg)
 
     def registerClient(self, msg):
         if self.isClientAlreadyRegistered(msg):
@@ -197,6 +191,13 @@ class ClientThread(Thread):
                 logs = json.load(file) + json.loads(messageLogs)
                 file.seek(0)
                 json.dump(logs, file)
+                self.sendSynchronizationResponse("ok", "")
+
+    def sendSynchronizationResponse(self, status, msg):
+        data = "4:" + status + ":" + msg
+        print("(L)sending on connection: ", conn)
+        data = bytes(data, 'utf-8')
+        self.conn.send(data)
 
     def synchronize(self, clientTimestamp):
         if self.clientLogin:
@@ -207,7 +208,7 @@ class ClientThread(Thread):
                 print("logs: ", filteredLogs)
                 if filteredLogs:
                     print("sending on connection: ", conn)
-                    self.conn.send(bytes("2:" + json.dumps(filteredLogs), 'utf-8'))
+                    self.conn.send(bytes("3:" + json.dumps(filteredLogs), 'utf-8'))
 
 if __name__=='__main__':
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
