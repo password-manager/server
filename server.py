@@ -9,6 +9,7 @@ import hashlib
 import base64
 import ssl
 import keyring
+from email.message import EmailMessage
 
 class ClientThread(Thread):
     def __init__(self, addr):
@@ -60,7 +61,7 @@ class ClientThread(Thread):
             self.send_registration_response("ok", "Email with verification code sent")
 
     def is_client_already_registered(self, msg):
-        if keyring.get_password("registered", msg.split(":")[0] + "_hash"):
+        if keyring.get_password("registered", msg.split(":")[0] + "_hash") == None:
             return True
         return False
 
@@ -75,13 +76,14 @@ class ClientThread(Thread):
     def save_client_data(self, msg, code):
         #TODO - check if client with given email is on the registrating list
         login, passw, salt = msg.split(":")
-        keyring.set_password("registering", login + "_hash", self.generate_hash(passw, bytes(salt, 'utf-8')))
+        keyring.set_password("registering", login + "_hash", self.generate_hash(passw, salt))
         keyring.set_password("registering", login + "_salt", salt)
         keyring.set_password("registering", login + "_code", code)
         print("(L)New client added to registering clients: " + login)
 
     def generate_hash(self, password, salt):
         #TODO - ??
+        salt = bytes(salt, 'utf-8')
         pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, 100000, dklen=64)
         pwdhash = base64.b64encode(pwdhash)
         print("(L)Generated hash")
@@ -91,12 +93,10 @@ class ClientThread(Thread):
         #TODO - nicer looking email
         #TODO - ??
         port, server, mail = get_server_config("config.json")
-        #receiver_email, _, _ = msg.split(":")
         receiver_email = msg.split(":")[0]
-        message = """\
-        Verification code
-
-        This is your verification code: """ + code
+        #message = EmailMessage()
+        #message['Subject'] = f'Verification code from AGH Password Manager'
+        message = "Your verification code: " + code
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(server, port, context = context) as server:
             server.login(mail, keyring.get_password("server", "password"))
@@ -114,21 +114,33 @@ class ClientThread(Thread):
 
     def verify_registration(self, msg):
         #todo - sprawdzanie hasła
-        if not self.check_verification_code(msg):
-            print("(L)Verification code incorrect")
-            self.send_registration_verification_response("notOk", "Verification code incorrect")
-        else:
+        #if not self.check_verification_code(msg):
+        #    print("(L)Verification code incorrect")
+        #    self.send_registration_verification_response("notOk", "Verification code incorrect")
+        if self.check_verification_code(msg):
             self.add_new_client(msg)
             print("(L)Successful registration")
             self.send_registration_verification_response("ok", "Succesfull registration")
 
     def check_verification_code(self, msg):
         login, passw, code = msg.split(":")
-        salt = bytes(keyring.get_password("registering", login + "_salt"), 'utf-8')
-        if keyring.get_password("registering", login + "_hash") == self.generate_hash(passw, salt):
-            if keyring.get_password("registering", login + "_code") == code:
-                print("(L)Verification code correct")
-                return True
+        salt = keyring.get_password("registering", login + "_salt")
+        if keyring.get_password("registering", login + "_hash"):
+            if keyring.get_password("registering", login + "_hash") == self.generate_hash(passw, salt):
+                if keyring.get_password("registering", login + "_code") == code:
+                    print("(L)Verification code correct")
+                    return True
+                else:
+                    self.send_registration_verification_response("notOk", "Verification code incorrect")
+                    print("(L)Verification code incorrect")
+            else:
+                self.send_registration_verification_response("notOk", "Password incorrect")
+                print("(L)Password incorrect")
+        else:
+            self.send_registration_verification_response("notOk", "Client doesn't exist")
+            print("(L)Client login incorrect")
+
+
         return False
 
     def add_new_client(self, msg):
@@ -165,7 +177,10 @@ class ClientThread(Thread):
         login, password, first_time = msg.split(":")
         if self.verify_password(login, password):
             print("(L)Login successful")
-            self.send_login_response("ok", "Login successful")
+            if first_time:
+                self.send_login_response("ok", keyring.get_password("registered", login + "_salt"))
+            else:
+                self.send_login_response("ok", "Login successful")
             self.client_login = login
         else:
             print("(L)Login unsuccessful")
@@ -177,7 +192,7 @@ class ClientThread(Thread):
         stored_hash = keyring.get_password("registered", login + "_hash")
         stored_salt = keyring.get_password("registered", login + "_salt")
 
-        if stored_hash and stored_hash == self.generate_hash(password, bytes(stored_salt, 'utf-8')):
+        if stored_hash and stored_hash == self.generate_hash(password, stored_salt):
             print("(L)Password correct")
             return True
         return False
