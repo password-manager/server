@@ -9,7 +9,8 @@ import hashlib
 import base64
 import ssl
 import keyring
-from email.message import EmailMessage
+#from Crypto.Protocol.KDF import PBKDF2
+
 
 class ClientThread(Thread):
     def __init__(self, addr):
@@ -82,6 +83,7 @@ class ClientThread(Thread):
         print("(L)New client added to registering clients: " + login)
 
     def generate_hash(self, password, salt):
+        #TODO -> verifyPassword
         #TODO - ??
         salt = bytes(salt, 'utf-8')
         pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, 100000, dklen=64)
@@ -114,9 +116,6 @@ class ClientThread(Thread):
 
     def verify_registration(self, msg):
         #todo - sprawdzanie hasła
-        #if not self.check_verification_code(msg):
-        #    print("(L)Verification code incorrect")
-        #    self.send_registration_verification_response("notOk", "Verification code incorrect")
         if self.check_verification_code(msg):
             self.add_new_client(msg)
             print("(L)Successful registration")
@@ -145,6 +144,7 @@ class ClientThread(Thread):
 
     def add_new_client(self, msg):
         #TODO - delete client from registering clients
+        #TODO - cipher key
         login, _, _ = msg.split(":")
 
         hash = keyring.get_password("registering", login + "_hash")
@@ -158,6 +158,9 @@ class ClientThread(Thread):
 
         keyring.set_password("registered", login + "_hash", hash)
         keyring.set_password("registered", login + "_salt", salt)
+
+        #cipher_key = PBKDF2(self.client_login + hash, salt.encode(), 16, 100000)  # 128-bit key
+        #keyring.set_password("registered", login + "_cipher", cipher_key)
 
         with open("databases/" + login + ".json", "w+") as file:
             file.write("[]")
@@ -177,7 +180,7 @@ class ClientThread(Thread):
         login, password, first_time = msg.split(":")
         if self.verify_password(login, password):
             print("(L)Login successful")
-            if first_time:
+            if first_time == 1:
                 self.send_login_response("ok", keyring.get_password("registered", login + "_salt"))
             else:
                 self.send_login_response("ok", "Login successful")
@@ -254,21 +257,23 @@ def get_server_config(file_name):
 
 
 if __name__=='__main__':
-    #try:
-    #    keyring.delete_password("registered", "klaudia.ma.garnek@gmail.com_hash")
-    #    keyring.delete_password("registered", "klaudia.ma.garnek@gmail.com_salt")
-    #    keyring.delete_password("registering", "klaudia.ma.garnek@gmail.com_hash")
-    #    keyring.delete_password("registering", "klaudia.ma.garnek@gmail.com_salt")
-    #    keyring.delete_password("registering", "klaudia.ma.garnek@gmail.com_code")
+    try:
+        keyring.delete_password("registered", "klaudia.ma.garnek@gmail.com_hash")
+        keyring.delete_password("registered", "klaudia.ma.garnek@gmail.com_salt")
+        #keyring.delete_password("registered", "klaudia.ma.garnek@gmail.com_cipher")
+        keyring.delete_password("registering", "klaudia.ma.garnek@gmail.com_hash")
+        keyring.delete_password("registering", "klaudia.ma.garnek@gmail.com_salt")
+        keyring.delete_password("registering", "klaudia.ma.garnek@gmail.com_code")
 
-    #    keyring.delete_password("registered", "klaudia.ma.garnek@onet.pl_hash")
-    #    keyring.delete_password("registered", "klaudia.ma.garnek@onet.pl_salt")
-    #    keyring.delete_password("registering", "klaudia.ma.garnek@onet.pl_hash")
-    #    keyring.delete_password("registering", "klaudia.ma.garnek@onet.pl_salt")
-    #    keyring.delete_password("registering", "klaudia.ma.garnek@onet.pl_code")
+        keyring.delete_password("registered", "klaudia.ma.garnek@onet.pl_hash")
+        keyring.delete_password("registered", "klaudia.ma.garnek@onet.pl_salt")
+        #keyring.delete_password("registered", "klaudia.ma.garnek@onet.pl_cipher")
+        keyring.delete_password("registering", "klaudia.ma.garnek@onet.pl_hash")
+        keyring.delete_password("registering", "klaudia.ma.garnek@onet.pl_salt")
+        keyring.delete_password("registering", "klaudia.ma.garnek@onet.pl_code")
 
-    #except:
-    #    pass
+    except:
+        pass
 
     #TODO - getpass
     #TODO - TLS
