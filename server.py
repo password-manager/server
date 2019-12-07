@@ -13,6 +13,9 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad, pad
 from Crypto.Random import get_random_bytes
 from Crypto.Protocol.KDF import PBKDF2
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
 
 class ClientThread(Thread):
     def __init__(self, addr):
@@ -99,18 +102,28 @@ class ClientThread(Thread):
         return pwdhash.decode()
 
     def send_mail_with_verification_code(self, msg, code):
-        #TODO - FIX!! (cos nie działa z tymi mailami, ale nie wiem jeszcze co)
-        # TODO - nicer looking email
         # TODO - ??
-        port, server, mail = get_server_config("config.json")
+        port, server, sender_email = get_server_config("config.json")
         receiver_email = msg.split(":")[0]
-        message = "Your verification code: " + code
-        print("code: ", code)
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(server, port, context=context) as server:
-            server.login(mail, keyring.get_password("server", "password"))
-            server.sendmail(mail, receiver_email, message)
+            server.login(sender_email, keyring.get_password("server", "password"))
+            server.sendmail(sender_email, receiver_email, self.generate_email(code, sender_email, receiver_email))
         print("(L)Email with verification code sent")
+
+    def generate_email(self, code, sender_email, receiver_email):
+        message = MIMEMultipart("alternative")
+        message["Subject"] = "Verification code"
+        message["From"] = sender_email
+        message["To"] = receiver_email
+        text = """\
+        Hello! 
+        This email is sent to You to verify Your email address in the Secure Password Manager.
+        If You haven't tried to create an account in the manager, please, ignore this email.
+        Your verification code: """ + code
+        email_body = MIMEText(text, "plain")
+        message.attach(email_body)
+        return message.as_string()
 
     def send_registration_response(self, status, msg):
         #TODO - refactoring
