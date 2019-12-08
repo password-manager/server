@@ -23,7 +23,7 @@ class ClientThread(Thread):
         self.addr = addr
         self.client_login = ""
         self.conn = conn
-        self.cipher_key = ""
+        #self.cipher_key
         print("(L)New connection on: ", addr)
 
     def run(self):
@@ -84,7 +84,6 @@ class ClientThread(Thread):
         return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
 
     def save_client_data(self, msg, code):
-        #TODO - check if client with given email is on the registering list
         login, passw, salt = msg.split(":")
         keyring.set_password("registering", login + "_hash", self.generate_hash(passw, salt))
         keyring.set_password("registering", login + "_salt", salt)
@@ -177,9 +176,12 @@ class ClientThread(Thread):
         keyring.set_password("registered", login + "_hash", hash)
         keyring.set_password("registered", login + "_salt", salt)
 
-        cipher_key = PBKDF2(self.client_login + password, salt.encode(), 16, 100000)  # 128-bit key
-        #keyring.set_password("registered", login + "_cipher", cipher_key)
+        cipher_key = PBKDF2(login + password, salt.encode(), 16, 100000)  # 128-bit key
         self.cipher_key = cipher_key
+        print("cipher key - register: ", cipher_key)
+        print("login: ", self.client_login)
+        print("password: ", password)
+        print("salt: ", salt)
 
         with open("databases/" + login, 'wb') as logs:
             key = self.cipher_key
@@ -202,12 +204,21 @@ class ClientThread(Thread):
         #TODO - first time - sending salt
         login, password, first_time = msg.split(":")
         if self.verify_password(login, password):
+            self.client_login = login
             print("(L)Login successful")
+            salt = keyring.get_password("registered", login + "_salt")
+            cipher_key = PBKDF2(self.client_login + password, salt.encode(), 16, 100000)  # 128-bit key
+            self.cipher_key = cipher_key
+            print("cipher_key - login: ", self.cipher_key)
+            print("login: ", self.client_login)
+            print("password: ", password)
+            print("salt: ", salt)
+            #self.cipher_key = PBKDF2(login + password, salt.encode(), 16, 100000)  # 128-bit key
             if first_time == '1':
-                self.send_login_response("ok", keyring.get_password("registered", login + "_salt"))
+                self.send_login_response("ok", salt)
             else:
                 self.send_login_response("ok", "Login successful")
-            self.client_login = login
+            #self.client_login = login
         else:
             print("(L)Login unsuccessful")
             self.send_login_response("notOk", "Login unsuccessful - wrong password")
@@ -233,11 +244,16 @@ class ClientThread(Thread):
     #SYNCHRONIZATION
 
     def store_logs(self, messageLogs):
+        print("storing logs")
         #TODO - refactoring
         if self.client_login:
+            print("elo 1")
             self.send_logs_to_all_online_devices(messageLogs)
+            print("elo 2")
             logs = self.get_logs()
+            print("elo 3")
             logs = json.loads(logs) + json.loads(messageLogs)
+            print("elo 4")
             logs = json.dumps(logs)
             print("(L)Storing logs: ", logs)
             self.save_logs(logs)
@@ -269,18 +285,19 @@ class ClientThread(Thread):
         #TODO - ???
         with open("databases/" + self.client_login, 'rb') as logs:
             raw = base64.b64decode(logs.read())
-            #key = keyring.get_password("registered", self.client_login + "_cipher")
+            print("raw: ", raw)
             key = self.cipher_key
+            print("cipher key - get logs: ", key)
             cipher = AES.new(key, AES.MODE_CBC, raw[:AES.block_size])
+            print("cipher: ", cipher)
             return unpad(cipher.decrypt(raw[AES.block_size:]), AES.block_size).decode('utf-8')
 
     def save_logs(self, new_data):
         #TODO - ???
         with open("databases/" + self.client_login, 'wb') as logs:
-            #key = keyring.get_password("registered", self.client_login + "_cipher")
             key = self.cipher_key
+            print("cipher key - save logs: ", self.cipher_key)
             iv = get_random_bytes(AES.block_size)
-            print("iv: ", iv)
             cipher = AES.new(key, AES.MODE_CBC, iv)
             logs.write(base64.b64encode(iv + cipher.encrypt(pad(str(new_data).encode('utf-8'),
                                                                 AES.block_size))))
@@ -319,11 +336,7 @@ def delete_client(login):
 
 if __name__=='__main__':
 
-    delete_client("klaudia.ma.garnek@gmail.com")
-    delete_client("ala@gmail.com")
-    delete_client("klaudia.ma.garnek@onet.pl")
-    delete_client("a@a.com")
-
+    #delete_client("klaudia.ma.garnek@gmail.com")
     #TODO - getpass
     #TODO - TLS
     #keyring.set_password("server", "password", input("Type in email password: "))
