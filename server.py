@@ -16,27 +16,29 @@ from Crypto.Protocol.KDF import PBKDF2
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-
 class ClientThread(Thread):
     def __init__(self, addr):
         Thread.__init__(self)
         self.addr = addr
         self.client_login = ""
         self.conn = conn
-        #self.cipher_key
         print("(L)New connection on: ", addr)
 
     def run(self):
         while True:
-            recv_data = self.conn.recv(2048)
-            if recv_data:
-                self.manage_message(recv_data)
-            else:
+            try:
+                recv_data = self.conn.recv(2048)
+                if recv_data:
+                    self.manage_message(recv_data.decode("utf-8"))
+                else:
+                    print("(L)Closing connection to: ", addr)
+                    self.conn.close()
+                    exit()
+            except:
                 print("(L)Closing connection to: ", addr)
-                self.conn.close()
+                exit()
 
     def manage_message(self, msg):
-        msg = msg.decode("utf-8")
         msg_id = msg[0]
         msg = msg[2:]
 
@@ -51,48 +53,45 @@ class ClientThread(Thread):
         if msg_id == "4":
             self.store_logs(msg)
 
-
     #REGISTRATION
 
     def register_client(self, msg):
-        if self.is_client_already_registered(msg):
+        if self.is_client_already_registered(msg.split(":")[0]):
             self.send_registration_response("notOk", "Client with given email is already registered")
             print("(L)Client already registered")
         elif not self.verify_client_email(msg):
             self.send_registration_response("notOk", "Email address is not valid")
             print("(L)Email not valid")
         else:
+            self.start_client_registration(msg)
             print("(L)Email is valid")
-            code = self.generate_verification_code()
-            self.save_client_data(msg, code)
-            self.send_mail_with_verification_code(msg, code)
-            self.send_registration_response("ok", "Email with verification code sent")
 
-    def is_client_already_registered(self, msg):
-        print()
-        if keyring.get_password("registered", msg.split(":")[0] + "_hash") == None:
-            return False
-        return True
+    def is_client_already_registered(self, login):
+        return keyring.get_password("registered", login + "_hash") != None
 
     def verify_client_email(self, msg):
-        #TODO - check dns
-        address, _, _ = msg.split(":")
-        return is_email(address, check_dns = False)
+        #TODO - check dns - is really working
+        address = msg.split(":")[0]
+        return is_email(address, check_dns = True)
 
     def generate_verification_code(self):
-        print("(L)Code generated")
+        print("(L)verification code generated")
         return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
 
-    def save_client_data(self, msg, code):
+    def start_client_registration(self, msg):
+        code = self.generate_verification_code()
+        self.save_registering_client_data(msg, code)
+        self.send_mail_with_verification_code(msg, code)
+
+    def save_registering_client_data(self, msg, code):
+        #TODO - cleaning memory
         login, passw, salt = msg.split(":")
         keyring.set_password("registering", login + "_hash", self.generate_hash(passw, salt))
         keyring.set_password("registering", login + "_salt", salt)
         keyring.set_password("registering", login + "_code", code)
-
         print("(L)New client added to registering clients: " + login)
 
     def generate_hash(self, password, salt):
-        #TODO -> verifyPassword
         #TODO - ??
         salt = bytes(salt, 'utf-8')
         pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, 100000, dklen=64)
@@ -101,16 +100,18 @@ class ClientThread(Thread):
         return pwdhash.decode()
 
     def send_mail_with_verification_code(self, msg, code):
-        # TODO - ??
+        #TODO - ??
         port, server, sender_email = get_server_config("config.json")
         receiver_email = msg.split(":")[0]
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(server, port, context=context) as server:
             server.login(sender_email, keyring.get_password("server", "password"))
             server.sendmail(sender_email, receiver_email, self.generate_email(code, sender_email, receiver_email))
+        self.send_registration_response("ok", "Email with verification code sent")
         print("(L)Email with verification code sent")
 
     def generate_email(self, code, sender_email, receiver_email):
+        #TODO - ??
         message = MIMEMultipart("alternative")
         message["Subject"] = "Verification code"
         message["From"] = sender_email
@@ -125,11 +126,11 @@ class ClientThread(Thread):
         return message.as_string()
 
     def send_registration_response(self, status, msg):
-        #TODO - refactoring
-        data = "0:" + status + ":" + msg
-        data = bytes(data, 'utf-8')
-        self.conn.send(data)
+        self.send_response("0", status, msg)
 
+    def send_response(self, id, status, msg):
+        data = bytes(id + ":" + status + ":" + msg + "\n", 'utf-8')
+        self.conn.send(data)
 
     #REGISTARTION VERIFICATION
 
@@ -140,12 +141,11 @@ class ClientThread(Thread):
             self.send_registration_verification_response("ok", "Succesfull registration")
 
     def check_credentials(self, msg):
-        login, passw, code = msg.split(":")
+        login, password, code = msg.split(":")
         salt = keyring.get_password("registering", login + "_salt")
-        if keyring.get_password("registering", login + "_hash"):
-            if keyring.get_password("registering", login + "_hash") == self.generate_hash(passw, salt):
-                if keyring.get_password("registering", login + "_code") == code:
-                    print("(L)Verification code correct")
+        if self.is_client_registering(login):
+            if self.is_password_valid(login, password, salt):
+                if self.is_verification_code_valid(login, code):
                     return True
                 else:
                     self.send_registration_verification_response("notOk", "Verification code incorrect")
@@ -156,106 +156,82 @@ class ClientThread(Thread):
         else:
             self.send_registration_verification_response("notOk", "Client doesn't exist")
             print("(L)Client login incorrect")
-
-
         return False
 
-    def add_new_client(self, msg):
-        #TODO - cipher key
-        login, password, _ = msg.split(":")
+    def is_client_registering(self, login):
+        return keyring.get_password("registering", login + "_hash") != None
 
+    def is_password_valid(self, login, password, salt):
+        return keyring.get_password("registering", login + "_hash") == self.generate_hash(password, salt)
+
+    def is_verification_code_valid(self, login, code):
+        return keyring.get_password("registering", login + "_code") == code
+
+    def add_new_client(self, msg):
+        login, password, _ = msg.split(":")
         hash = keyring.get_password("registering", login + "_hash")
         salt = keyring.get_password("registering", login + "_salt")
-
-        keyring.delete_password("registering", login + "_hash")
-        keyring.delete_password("registering", login + "_salt")
-        keyring.delete_password("registering", login + "_code")
-
         print("(L)New client: " + login + " (" + hash + ", " + salt + ")")
 
         keyring.set_password("registered", login + "_hash", hash)
         keyring.set_password("registered", login + "_salt", salt)
 
-        cipher_key = PBKDF2(login + password, salt.encode(), 16, 100000)  # 128-bit key
-        self.cipher_key = cipher_key
-        print("cipher key - register: ", cipher_key)
-        print("login: ", self.client_login)
-        print("password: ", password)
-        print("salt: ", salt)
+        cipher_key = self.generate_cipher_key(login + password, salt)
+        self.create_client_database(login, cipher_key)
 
+    def delete_from_registering_clients(self, login):
+        keyring.delete_password("registering", login + "_hash")
+        keyring.delete_password("registering", login + "_salt")
+        keyring.delete_password("registering", login + "_code")
+
+    def generate_cipher_key(self, data, salt):
+        #TODO - ??
+        return PBKDF2(data, salt.encode(), 16, 100000)  # 128-bit key
+
+    def create_client_database(self, login, key):
+        #TODO - ??
         with open("databases/" + login, 'wb') as logs:
-            key = self.cipher_key
             iv = get_random_bytes(AES.block_size)
-            print("iv: ", iv)
             cipher = AES.new(key, AES.MODE_CBC, iv)
             logs.write(base64.b64encode(iv + cipher.encrypt(pad(str("[]").encode('utf-8'), AES.block_size))))
 
     def send_registration_verification_response(self, status, msg):
-        #TODO - refactoring
-        data = "1:" + status + ":" + msg
-        data = bytes(data, 'utf-8')
-        self.conn.send(data)
-
+        self.send_response("1", status, msg)
 
     #LOGIN
 
     def login_client(self, msg):
-        #TODO - konkretne kozy
-        #TODO - first time - sending salt
+        #TODO - cipher_key do keyringa
         login, password, first_time = msg.split(":")
-        if self.verify_password(login, password):
-            self.client_login = login
-            print("(L)Login successful")
+        if self.is_client_already_registered(login):
             salt = keyring.get_password("registered", login + "_salt")
-            cipher_key = PBKDF2(self.client_login + password, salt.encode(), 16, 100000)  # 128-bit key
-            self.cipher_key = cipher_key
-            print("cipher_key - login: ", self.cipher_key)
-            print("login: ", self.client_login)
-            print("password: ", password)
-            print("salt: ", salt)
-            #self.cipher_key = PBKDF2(login + password, salt.encode(), 16, 100000)  # 128-bit key
-            if first_time == '1':
-                self.send_login_response("ok", salt)
+            if self.is_password_valid(login, password, salt):
+                self.client_login = login
+                self.cipher_key = self.generate_cipher_key(login + password, salt)
+                print("(L)Login successful")
+                if first_time == '1':
+                    self.send_login_response("ok", salt)
+                else:
+                    self.send_login_response("ok", "Login successful")
             else:
-                self.send_login_response("ok", "Login successful")
-            #self.client_login = login
+                print("(L)Login unsuccessful")
+                self.send_login_response("notOk", "Login unsuccessful - wrong password")
         else:
             print("(L)Login unsuccessful")
-            self.send_login_response("notOk", "Login unsuccessful - wrong password")
-
-    def verify_password(self, login, password):
-        #TODO - refactoring
-        #TODO - does he exist?
-        stored_hash = keyring.get_password("registered", login + "_hash")
-        stored_salt = keyring.get_password("registered", login + "_salt")
-
-        if stored_hash and stored_hash == self.generate_hash(password, stored_salt):
-            print("(L)Password correct")
-            return True
-        return False
+            self.send_login_response("notOk", "Login unsuccessful - wrong email")
 
     def send_login_response(self, status, msg):
-        #TODO - refactoring
-        data = "2:" + status + ":" + msg
-        data = bytes(data, 'utf-8')
-        self.conn.send(data)
-
+        self.send_response("2", status, msg)
 
     #SYNCHRONIZATION
 
     def store_logs(self, messageLogs):
-        print("storing logs")
         #TODO - refactoring
         if self.client_login:
-            print("elo 1")
-            self.send_logs_to_all_online_devices(messageLogs)
-            print("elo 2")
+            #self.send_logs_to_all_online_devices(messageLogs) #TODO - czy chcemy tej funkcjonalności?
             logs = self.get_logs()
-            print("elo 3")
             logs = json.loads(logs) + json.loads(messageLogs)
-            print("elo 4")
             logs = json.dumps(logs)
-            print("(L)Storing logs: ", logs)
             self.save_logs(logs)
             self.send_synchronization_response("ok", "")
 
@@ -267,10 +243,9 @@ class ClientThread(Thread):
 
     def send_synchronization_response(self, status, msg):
         #TODO - refactoring
-        data = "4:" + status + ":" + msg
+        data = "4:" + status + ":" + msg + "\n"
         data = bytes(data, 'utf-8')
         self.conn.send(data)
-
 
     def synchronize(self, clientTimestamp):
         #TODO - refactoring
@@ -278,7 +253,7 @@ class ClientThread(Thread):
             logs = self.get_logs()
             logs = json.loads(logs)
             filteredLogs = [log for log in logs if log['timestamp'] > clientTimestamp]
-            self.conn.send(bytes("3:" + json.dumps(filteredLogs), 'utf-8'))
+            self.conn.send(bytes("3:" + json.dumps(filteredLogs) + "\n", 'utf-8'))
             print("(L)Sending synchronization logs: ", filteredLogs)
 
     def get_logs(self):
@@ -336,10 +311,10 @@ def delete_client(login):
 
 if __name__=='__main__':
 
-    #delete_client("klaudia.ma.garnek@gmail.com")
+    delete_client("klaudia.ma.garnek@gmail.com")
     #TODO - getpass
     #TODO - TLS
-    #keyring.set_password("server", "password", input("Type in email password: "))
+    #keyring.set_password("server", "password", input("Password: "))
     keyring.set_password("server", "password", "strongestPasswordEver")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0) as server:
