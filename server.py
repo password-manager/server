@@ -8,6 +8,7 @@ import base64
 import ssl
 import keyring
 import os
+import time
 from threading import Thread
 from pyisemail import is_email
 from Crypto.Cipher import AES
@@ -50,7 +51,7 @@ class ClientThread(Thread):
         if msg_id == "2":
             self.login_client(msg)
         if msg_id == "3":
-            self.synchronize(int(msg))
+            self.synchronize(float(msg))
         if msg_id == "4":
             self.store_logs(msg)
 
@@ -90,6 +91,8 @@ class ClientThread(Thread):
         keyring.set_password("registering", login + "_hash", self.generate_hash(passw, salt))
         keyring.set_password("registering", login + "_salt", salt)
         keyring.set_password("registering", login + "_code", code)
+        keyring.set_password("registering", login + "_timestamp", time.time())
+        registering_client_logins.append(login)
         print("(L)New client added to registering clients: " + login)
 
     def generate_hash(self, password, salt):
@@ -174,16 +177,19 @@ class ClientThread(Thread):
         salt = keyring.get_password("registering", login + "_salt")
         print("(L)New client: " + login + " (" + hash + ", " + salt + ")")
 
+
         keyring.set_password("registered", login + "_hash", hash)
         keyring.set_password("registered", login + "_salt", salt)
 
         cipher_key = self.generate_cipher_key(login + password, salt)
         self.create_client_database(login, cipher_key)
+        self.delete_from_registering_clients(login)
 
     def delete_from_registering_clients(self, login):
         keyring.delete_password("registering", login + "_hash")
         keyring.delete_password("registering", login + "_salt")
         keyring.delete_password("registering", login + "_code")
+        keyring.delete_password("registering", login + "_timestamp")
 
     def generate_cipher_key(self, data, salt):
         #TODO - ??
@@ -206,7 +212,7 @@ class ClientThread(Thread):
         login, password, first_time = msg.split(":")
         if self.is_client_already_registered(login):
             salt = keyring.get_password("registered", login + "_salt")
-            if self.is_password_valid(login, password, salt):
+            if keyring.get_password("registered", login + "_hash") == self.generate_hash(password, salt):
                 self.client_login = login
                 self.cipher_key = self.generate_cipher_key(login + password, salt)
                 print("(L)Login successful")
@@ -235,7 +241,7 @@ class ClientThread(Thread):
             print("(L)Storing logs")
 
     def send_logs_to_all_online_devices(self, logs):
-        for device in clientThreads:
+        for device in client_threads:
             if device != self and device.client_login == self.client_login:
                 device.conn.send(bytes("3:" + logs + "\n", 'utf-8'))
                 print("(L)Sending logs to device: ", device)
@@ -289,6 +295,7 @@ def delete_client(login):
         keyring.delete_password("registering", login + "_hash")
         keyring.delete_password("registering", login + "_salt")
         keyring.delete_password("registering", login + "_code")
+        keyring.delete_password("registering", login + "_timestamp")
     except:
         pass
 
@@ -308,11 +315,13 @@ if __name__=='__main__':
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0) as server:
         host, port = get_socket_config("config.json")
         server.bind((host, port))
-        clientThreads = []
+        client_threads = []
+        registering_client_logins = []
         print("(L)Ready for connection")
         while True:
             server.listen()
+            #server = ssl.wrap_socket(server, server_side = True, keyfile = "", certfile = " ")
             (conn, addr) = server.accept()
             newClient = ClientThread(addr)
             newClient.start()
-            clientThreads.append(newClient)
+            client_threads.append(newClient)
