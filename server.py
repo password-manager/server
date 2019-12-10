@@ -93,7 +93,7 @@ class ClientThread(Thread):
         keyring.set_password("registering", login + "_hash", self.generate_hash(passw, salt))
         keyring.set_password("registering", login + "_salt", salt)
         keyring.set_password("registering", login + "_code", code)
-        keyring.set_password("registering", login + "_timestamp", time.time())
+        keyring.set_password("registering", login + "_timestamp", str(time.time()))
         registering_client_logins.append(login)
         print("(L)New client added to registering clients: " + login)
 
