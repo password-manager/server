@@ -342,7 +342,7 @@ if __name__=='__main__':
         print("(L)Ready for connection")
         while True:
             server.listen()
-            #server = ssl.wrap_socket(server, server_side = True, keyfile = "", certfile = " ")
+            server = ssl.wrap_socket(server, server_side = True, keyfile = "privateKey.key", certfile = "mycertificate.crt")
             (conn, addr) = server.accept()
             newClient = ClientThread(addr)
             newClient.start()
