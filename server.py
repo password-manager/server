@@ -18,6 +18,8 @@ from Crypto.Protocol.KDF import PBKDF2
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+CLEANING_PERIOD = 300
+
 class ClientThread(Thread):
     def __init__(self, addr):
         Thread.__init__(self)
@@ -183,13 +185,13 @@ class ClientThread(Thread):
 
         cipher_key = self.generate_cipher_key(login + password, salt)
         self.create_client_database(login, cipher_key)
-        self.delete_from_registering_clients(login)
+        delete_from_registering_clients(login)
 
-    def delete_from_registering_clients(self, login):
-        keyring.delete_password("registering", login + "_hash")
-        keyring.delete_password("registering", login + "_salt")
-        keyring.delete_password("registering", login + "_code")
-        keyring.delete_password("registering", login + "_timestamp")
+    #def delete_from_registering_clients(self, login):
+    #    keyring.delete_password("registering", login + "_hash")
+    #    keyring.delete_password("registering", login + "_salt")
+    #    keyring.delete_password("registering", login + "_code")
+    #    keyring.delete_password("registering", login + "_timestamp")
 
     def generate_cipher_key(self, data, salt):
         #TODO - ??
@@ -273,6 +275,19 @@ class ClientThread(Thread):
             logs.write(base64.b64encode(iv + cipher.encrypt(pad(str(new_data).encode('utf-8'),
                                                                 AES.block_size))))
 
+class CleaningThread(Thread):
+    def run(self):
+        while True:
+            time.sleep(CLEANING_PERIOD)
+            for client in registering_client_logins:
+                if time.time() - float(keyring.get_password("registering", client + "_timestamp")) > CLEANING_PERIOD:
+                    try:
+                        registering_client_logins.remove(client)
+                        delete_from_registering_clients(client)
+                        print("(L)Deleted client from registering clients: ", client)
+                    except:
+                        pass
+
 def get_socket_config(file_name):
     with open(file_name, "r") as file:
         config = json.load(file)
@@ -283,6 +298,11 @@ def get_server_config(file_name):
         config = json.load(file)
         return config['ssl_port'], config['smtp_server'], config['sender_email']
 
+def delete_from_registering_clients(login):
+    keyring.delete_password("registering", login + "_hash")
+    keyring.delete_password("registering", login + "_salt")
+    keyring.delete_password("registering", login + "_code")
+    keyring.delete_password("registering", login + "_timestamp")
 
 def delete_client(login):
     try:
@@ -317,6 +337,8 @@ if __name__=='__main__':
         server.bind((host, port))
         client_threads = []
         registering_client_logins = []
+        cleaning_thread = CleaningThread()
+        cleaning_thread.start()
         print("(L)Ready for connection")
         while True:
             server.listen()
