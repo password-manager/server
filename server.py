@@ -7,6 +7,7 @@ import hashlib
 import base64
 import ssl
 import keyring
+import os
 from threading import Thread
 from pyisemail import is_email
 from Crypto.Cipher import AES
@@ -226,58 +227,45 @@ class ClientThread(Thread):
     #SYNCHRONIZATION
 
     def store_logs(self, messageLogs):
-        #TODO - refactoring
         if self.client_login:
             #self.send_logs_to_all_online_devices(messageLogs) #TODO - czy chcemy tej funkcjonalności?
-            logs = self.get_logs()
-            logs = json.loads(logs) + json.loads(messageLogs)
-            logs = json.dumps(logs)
+            logs = json.dumps(json.loads(self.get_logs()) + json.loads(messageLogs))
             self.save_logs(logs)
             self.send_synchronization_response("ok", "")
+            print("(L)Storing logs")
 
     def send_logs_to_all_online_devices(self, logs):
         for device in clientThreads:
             if device != self and device.client_login == self.client_login:
-                device.conn.send(bytes("3:" + logs, 'utf-8'))
+                device.conn.send(bytes("3:" + logs + "\n", 'utf-8'))
                 print("(L)Sending logs to device: ", device)
 
     def send_synchronization_response(self, status, msg):
-        #TODO - refactoring
-        data = "4:" + status + ":" + msg + "\n"
-        data = bytes(data, 'utf-8')
-        self.conn.send(data)
+        self.send_response("4", status, msg)
 
-    def synchronize(self, clientTimestamp):
+    def synchronize(self, client_timestamp):
         #TODO - refactoring
         if self.client_login:
-            logs = self.get_logs()
-            logs = json.loads(logs)
-            filteredLogs = [log for log in logs if log['timestamp'] > clientTimestamp]
-            self.conn.send(bytes("3:" + json.dumps(filteredLogs) + "\n", 'utf-8'))
-            print("(L)Sending synchronization logs: ", filteredLogs)
+            #logs = self.get_logs()
+            logs = json.loads(self.get_logs())
+            filtered_logs = [log for log in logs if log['timestamp'] > client_timestamp]
+            self.conn.send(bytes("3:" + json.dumps(filtered_logs) + "\n", 'utf-8'))
+            print("(L)Sending synchronization logs: ", filtered_logs)
 
     def get_logs(self):
         #TODO - ???
         with open("databases/" + self.client_login, 'rb') as logs:
             raw = base64.b64decode(logs.read())
-            print("raw: ", raw)
-            key = self.cipher_key
-            print("cipher key - get logs: ", key)
-            cipher = AES.new(key, AES.MODE_CBC, raw[:AES.block_size])
-            print("cipher: ", cipher)
+            cipher = AES.new(self.cipher_key, AES.MODE_CBC, raw[:AES.block_size])
             return unpad(cipher.decrypt(raw[AES.block_size:]), AES.block_size).decode('utf-8')
 
     def save_logs(self, new_data):
         #TODO - ???
         with open("databases/" + self.client_login, 'wb') as logs:
-            key = self.cipher_key
-            print("cipher key - save logs: ", self.cipher_key)
             iv = get_random_bytes(AES.block_size)
-            cipher = AES.new(key, AES.MODE_CBC, iv)
+            cipher = AES.new(self.cipher_key, AES.MODE_CBC, iv)
             logs.write(base64.b64encode(iv + cipher.encrypt(pad(str(new_data).encode('utf-8'),
                                                                 AES.block_size))))
-
-
 
 def get_socket_config(file_name):
     with open(file_name, "r") as file:
@@ -294,7 +282,6 @@ def delete_client(login):
     try:
         keyring.delete_password("registered", login + "_hash")
         keyring.delete_password("registered", login + "_salt")
-        keyring.delete_password("registered", login + "_cipher")
     except:
         pass
 
@@ -302,20 +289,21 @@ def delete_client(login):
         keyring.delete_password("registering", login + "_hash")
         keyring.delete_password("registering", login + "_salt")
         keyring.delete_password("registering", login + "_code")
-
     except:
         pass
 
-
-
+    try:
+        os.remove("databases/" + login)
+    except:
+        pass
 
 if __name__=='__main__':
-
-    delete_client("klaudia.ma.garnek@gmail.com")
     #TODO - getpass
     #TODO - TLS
+    delete_client("klaudia.ma.garnek@gmail.com")
+
     #keyring.set_password("server", "password", input("Password: "))
-    keyring.set_password("server", "password", "strongestPasswordEver")
+    keyring.set_password("server", "password", "Superpassword1!")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0) as server:
         host, port = get_socket_config("config.json")
