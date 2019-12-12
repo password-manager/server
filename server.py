@@ -38,7 +38,8 @@ class ClientThread(Thread):
                     print("(L)Closing connection to: ", addr)
                     self.conn.close()
                     exit()
-            except:
+            except Exception as e:
+                print("(L)Exception: ", e)
                 print("(L)Closing connection to: ", addr)
                 exit()
 
@@ -74,12 +75,15 @@ class ClientThread(Thread):
         return keyring.get_password("registered", login + "_hash") != None
 
     def verify_client_email(self, msg):
-        #TODO - check dns - is really working
         address = msg.split(":")[0]
-        return is_email(address, check_dns = True)
+        try:
+            return is_email(address, check_dns = True)
+        except:
+            print("(L)Cannot check email domain")
+            return is_email(address, check_dns = False)
 
     def generate_verification_code(self):
-        print("(L)verification code generated")
+        print("(L)Verification code generated")
         return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(10))
 
     def start_client_registration(self, msg):
@@ -88,7 +92,6 @@ class ClientThread(Thread):
         self.send_mail_with_verification_code(msg, code)
 
     def save_registering_client_data(self, msg, code):
-        #TODO - cleaning memory
         login, passw, salt = msg.split(":")
         keyring.set_password("registering", login + "_hash", self.generate_hash(passw, salt))
         keyring.set_password("registering", login + "_salt", salt)
@@ -98,7 +101,6 @@ class ClientThread(Thread):
         print("(L)New client added to registering clients: " + login)
 
     def generate_hash(self, password, salt):
-        #TODO - ??
         salt = bytes(salt, 'utf-8')
         pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, 100000, dklen=64)
         pwdhash = base64.b64encode(pwdhash)
@@ -106,7 +108,6 @@ class ClientThread(Thread):
         return pwdhash.decode()
 
     def send_mail_with_verification_code(self, msg, code):
-        #TODO - ??
         port, server, sender_email = get_server_config("config.json")
         receiver_email = msg.split(":")[0]
         context = ssl.create_default_context()
@@ -117,7 +118,6 @@ class ClientThread(Thread):
         print("(L)Email with verification code sent")
 
     def generate_email(self, code, sender_email, receiver_email):
-        #TODO - ??
         message = MIMEMultipart("alternative")
         message["Subject"] = "Verification code"
         message["From"] = sender_email
@@ -187,18 +187,10 @@ class ClientThread(Thread):
         self.create_client_database(login, cipher_key)
         delete_from_registering_clients(login)
 
-    #def delete_from_registering_clients(self, login):
-    #    keyring.delete_password("registering", login + "_hash")
-    #    keyring.delete_password("registering", login + "_salt")
-    #    keyring.delete_password("registering", login + "_code")
-    #    keyring.delete_password("registering", login + "_timestamp")
-
     def generate_cipher_key(self, data, salt):
-        #TODO - ??
         return PBKDF2(data, salt.encode(), 16, 100000)  # 128-bit key
 
     def create_client_database(self, login, key):
-        #TODO - ??
         with open("databases/" + login, 'wb') as logs:
             iv = get_random_bytes(AES.block_size)
             cipher = AES.new(key, AES.MODE_CBC, iv)
@@ -210,7 +202,6 @@ class ClientThread(Thread):
     #LOGIN
 
     def login_client(self, msg):
-        #TODO - cipher_key do keyringa
         login, password, first_time = msg.split(":")
         if self.is_client_already_registered(login):
             salt = keyring.get_password("registered", login + "_salt")
@@ -252,23 +243,19 @@ class ClientThread(Thread):
         self.send_response("4", status, msg)
 
     def synchronize(self, client_timestamp):
-        #TODO - refactoring
         if self.client_login:
-            #logs = self.get_logs()
             logs = json.loads(self.get_logs())
             filtered_logs = [log for log in logs if log['timestamp'] > client_timestamp]
             self.conn.send(bytes("3:" + json.dumps(filtered_logs) + "\n", 'utf-8'))
             print("(L)Sending synchronization logs: ", filtered_logs)
 
     def get_logs(self):
-        #TODO - ???
         with open("databases/" + self.client_login, 'rb') as logs:
             raw = base64.b64decode(logs.read())
             cipher = AES.new(self.cipher_key, AES.MODE_CBC, raw[:AES.block_size])
             return unpad(cipher.decrypt(raw[AES.block_size:]), AES.block_size).decode('utf-8')
 
     def save_logs(self, new_data):
-        #TODO - ???
         with open("databases/" + self.client_login, 'wb') as logs:
             iv = get_random_bytes(AES.block_size)
             cipher = AES.new(self.cipher_key, AES.MODE_CBC, iv)
@@ -279,14 +266,11 @@ class CleaningThread(Thread):
     def run(self):
         while True:
             time.sleep(CLEANING_PERIOD)
+            print("(Clean)Clients: ", registering_client_logins)
             for client in registering_client_logins:
+                print("(Clean)Client: ", client)
                 if time.time() - float(keyring.get_password("registering", client + "_timestamp")) > CLEANING_PERIOD:
-                    try:
-                        registering_client_logins.remove(client)
-                        delete_from_registering_clients(client)
-                        print("(L)Deleted client from registering clients: ", client)
-                    except:
-                        pass
+                    delete_from_registering_clients(client)
 
 def get_socket_config(file_name):
     with open(file_name, "r") as file:
@@ -304,7 +288,10 @@ def delete_from_registering_clients(login):
     keyring.delete_password("registering", login + "_code")
     keyring.delete_password("registering", login + "_timestamp")
 
-def delete_client(login):
+    registering_client_logins.remove(login)
+    print("(L)Removing from registering clients: ", login)
+
+def delete_client(login): #pomocnicza funkcja do testowania
     try:
         keyring.delete_password("registered", login + "_hash")
         keyring.delete_password("registered", login + "_salt")
@@ -323,12 +310,14 @@ def delete_client(login):
         os.remove("databases/" + login)
     except:
         pass
+    
+    try:
+        registering_client_logins.remove(login)
+    except:
+        pass
 
 if __name__=='__main__':
     #TODO - getpass
-    #TODO - TLS
-    delete_client("klaudia.ma.garnek@gmail.com")
-
     #keyring.set_password("server", "password", input("Password: "))
     keyring.set_password("server", "password", "Superpassword1!")
 
