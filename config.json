@@ -1,0 +1,7 @@
+{"host": "127.0.0.1",
+ "port":  8887,
+ "ssl_port": 465,
+ "smtp_server": "smtp.gmail.com",
+ "sender_email": "aghpassman@gmail.com"}
+
+
